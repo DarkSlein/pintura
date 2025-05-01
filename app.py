@@ -93,13 +93,15 @@ class DrawingPracticeApp:
         self.current_base_width = 0
         self.current_base_height = 0
 
-        self.canvas.bind("<Button-1>", self.on_canvas_click)
+        self.canvas.bind("<Button-3>", self.on_canvas_click)
         self.canvas.bind("<MouseWheel>", self.on_mousewheel)
         self.canvas.bind("<ButtonPress-1>", self.on_drag_start)
         self.canvas.bind("<B1-Motion>", self.on_drag_move)
         self.canvas.bind("<ButtonRelease-1>", self.on_drag_end)
         self.canvas.bind("<Configure>", self.on_canvas_configure)
-    
+
+        self.folder_label.bind("<Button-1>", self.on_folder_label_click)
+
     def load_settings(self):
         self.root.withdraw()
 
@@ -541,6 +543,9 @@ class DrawingPracticeApp:
 
     def on_drag_end(self, event):
         self.is_dragging = False
+
+    def on_folder_label_click(self, event):
+        os.startfile(self.image_path)
 
 if __name__ == "__main__":
     root = tk.Tk()
