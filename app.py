@@ -84,7 +84,21 @@ class DrawingPracticeApp:
         self.root.rowconfigure(1, weight=1)
         self.root.columnconfigure(0, weight=1)
 
+        self.scale_factor = 1.0
+        self.offset_x = 0
+        self.offset_y = 0
+        self.drag_start_x = 0
+        self.drag_start_y = 0
+        self.is_dragging = False
+        self.current_base_width = 0
+        self.current_base_height = 0
+
         self.canvas.bind("<Button-1>", self.on_canvas_click)
+        self.canvas.bind("<MouseWheel>", self.on_mousewheel)
+        self.canvas.bind("<ButtonPress-1>", self.on_drag_start)
+        self.canvas.bind("<B1-Motion>", self.on_drag_move)
+        self.canvas.bind("<ButtonRelease-1>", self.on_drag_end)
+        self.canvas.bind("<Configure>", self.on_canvas_configure)
     
     def load_settings(self):
         self.root.withdraw()
@@ -303,6 +317,7 @@ class DrawingPracticeApp:
 
             # Resize the image based on the current canvas size
             self.resize_image()
+            self.reset_zoom()
 
             # Proccess the timer counter
             self.count_time()
@@ -342,28 +357,50 @@ class DrawingPracticeApp:
     def resize_image(self):
         canvas_width = self.canvas.winfo_width()
         canvas_height = self.canvas.winfo_height()
+        
+        if not hasattr(self, 'original_image'):
+            return
+        
+        # Базовое масштабирование под холст
         image_width, image_height = self.original_image.size
-
-        # Calculate the new size preserving the aspect ratio
         aspect_ratio = image_width / image_height
+        
         if canvas_width / aspect_ratio <= canvas_height:
-            new_width = canvas_width
-            new_height = int(canvas_width / aspect_ratio)
+            base_width = canvas_width
+            base_height = int(canvas_width / aspect_ratio)
         else:
-            new_height = canvas_height
-            new_width = int(canvas_height * aspect_ratio)
-
-        resized_image = self.original_image.resize((new_width, new_height))
+            base_height = canvas_height
+            base_width = int(canvas_height * aspect_ratio)
+        
+        self.current_base_width = base_width
+        self.current_base_height = base_height
+        
+        # Применяем текущий масштаб
+        scaled_width = int(base_width * self.scale_factor)
+        scaled_height = int(base_height * self.scale_factor)
+        
+        # Масштабируем и позиционируем изображение
+        resized_image = self.original_image.resize((scaled_width, scaled_height))
         self.photo = ImageTk.PhotoImage(resized_image)
-
+        
+        # Позиция с учетом смещения
+        x = canvas_width // 2 + self.offset_x
+        y = canvas_height // 2 + self.offset_y
+        
         self.canvas.delete("all")
-        self.canvas.create_image((canvas_width // 2, canvas_height // 2), image=self.photo, anchor=tk.CENTER)
-        self.canvas.image = self.photo  # Keep a reference to avoid garbage collection
-
+        self.canvas.create_image(x, y, image=self.photo, anchor=tk.CENTER)
+        self.canvas.image = self.photo
+        
+        # Обновляем имя файла
         image_name = os.path.basename(self.image_path)
-
-        # Draw the folder path in the upper left corner
         self.folder_label.config(text=image_name)
+
+    def reset_zoom(self):
+        self.scale_factor = 1.0  # Сбрасываем масштаб
+        self.offset_x = 0        # Сбрасываем горизонтальное смещение
+        self.offset_y = 0        # Сбрасываем вертикальное смещение
+        self.resize_image()      # Перерисовываем изображение
+        self.canvas.config(scrollregion=self.canvas.bbox(tk.ALL))  # Обновляем область прокрутки
 
     def config_timer_label(self):
         timer_seconds = int(self.remaining_time / 1000)
@@ -439,6 +476,71 @@ class DrawingPracticeApp:
 
     def on_canvas_click(self, event):
         self.toggle_pause()
+
+    def on_canvas_configure(self, event):
+        # Сброс параметров при изменении размера окна
+        self.scale_factor = 1.0
+        self.offset_x = 0
+        self.offset_y = 0
+        self.resize_image()
+
+    def on_mousewheel(self, event):
+        # Определение направления зума
+        if event.delta > 0 or event.num == 4:
+            scale_factor = 1.1
+        else:
+            scale_factor = 1/1.1
+        
+        new_scale = self.scale_factor * scale_factor
+        if new_scale < 0.1 or new_scale > 10:
+            return  # Ограничение масштаба
+        
+        # Получаем координаты курсора относительно холста
+        canvas_x = self.canvas.canvasx(event.x)
+        canvas_y = self.canvas.canvasy(event.y)
+        
+        # Текущий центр изображения
+        old_center_x = self.canvas.winfo_width() // 2 + self.offset_x
+        old_center_y = self.canvas.winfo_height() // 2 + self.offset_y
+        
+        # Вычисляем смещение курсора относительно центра
+        rel_x = canvas_x - old_center_x
+        rel_y = canvas_y - old_center_y
+        
+        # Применяем изменение масштаба
+        delta_scale = new_scale / self.scale_factor
+        self.scale_factor = new_scale
+        
+        # Корректируем смещение для сохранения позиции курсора
+        new_rel_x = rel_x * delta_scale
+        new_rel_y = rel_y * delta_scale
+        new_center_x = canvas_x - new_rel_x
+        new_center_y = canvas_y - new_rel_y
+        
+        # Обновляем смещение изображения
+        self.offset_x = new_center_x - (self.canvas.winfo_width() // 2)
+        self.offset_y = new_center_y - (self.canvas.winfo_height() // 2)
+        
+        self.resize_image()
+
+    def on_drag_start(self, event):
+        self.is_dragging = True
+        self.drag_start_x = event.x
+        self.drag_start_y = event.y
+
+    def on_drag_move(self, event):
+        if self.is_dragging:
+            # Вычисляем смещение курсора
+            delta_x = event.x - self.drag_start_x
+            delta_y = event.y - self.drag_start_y
+            self.offset_x += delta_x
+            self.offset_y += delta_y
+            self.drag_start_x = event.x
+            self.drag_start_y = event.y
+            self.resize_image()
+
+    def on_drag_end(self, event):
+        self.is_dragging = False
 
 if __name__ == "__main__":
     root = tk.Tk()
