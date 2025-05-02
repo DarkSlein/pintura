@@ -93,6 +93,8 @@ class DrawingPracticeApp:
         self.current_base_width = 0
         self.current_base_height = 0
 
+        self.image_id = None
+
         self.canvas.bind("<Button-3>", self.on_canvas_click)
         self.canvas.bind("<MouseWheel>", self.on_mousewheel)
         self.canvas.bind("<ButtonPress-1>", self.on_drag_start)
@@ -357,11 +359,11 @@ class DrawingPracticeApp:
         self.config_timer_label()
 
     def resize_image(self):
-        canvas_width = self.canvas.winfo_width()
-        canvas_height = self.canvas.winfo_height()
-        
         if not hasattr(self, 'original_image'):
             return
+
+        canvas_width = self.canvas.winfo_width()
+        canvas_height = self.canvas.winfo_height()
         
         # Базовое масштабирование под холст
         image_width, image_height = self.original_image.size
@@ -380,22 +382,32 @@ class DrawingPracticeApp:
         # Применяем текущий масштаб
         scaled_width = int(base_width * self.scale_factor)
         scaled_height = int(base_height * self.scale_factor)
-        
-        # Масштабируем и позиционируем изображение
         resized_image = self.original_image.resize((scaled_width, scaled_height))
+        
+        # Создаем новое изображение только при изменении размера/повороте
         self.photo = ImageTk.PhotoImage(resized_image)
+
+        # Обновляем или создаем изображение на холсте
+        if self.image_id:
+            self.canvas.itemconfig(self.image_id, image=self.photo)
+        else:
+            self.image_id = self.canvas.create_image(
+                canvas_width // 2 + self.offset_x,
+                canvas_height // 2 + self.offset_y,
+                image=self.photo, anchor=tk.CENTER, tags="image"
+            )
         
-        # Позиция с учетом смещения
-        x = canvas_width // 2 + self.offset_x
-        y = canvas_height // 2 + self.offset_y
-        
-        self.canvas.delete("all")
-        self.canvas.create_image(x, y, image=self.photo, anchor=tk.CENTER)
-        self.canvas.image = self.photo
+        self.update_image_position()
         
         # Обновляем имя файла
         image_name = os.path.basename(self.image_path)
         self.folder_label.config(text=image_name)
+
+    def update_image_position(self):
+        if self.image_id:
+            x = self.canvas.winfo_width() // 2 + self.offset_x
+            y = self.canvas.winfo_height() // 2 + self.offset_y
+            self.canvas.coords(self.image_id, x, y)
 
     def reset_zoom(self):
         self.scale_factor = 1.0  # Сбрасываем масштаб
@@ -471,6 +483,7 @@ class DrawingPracticeApp:
     def on_resize(self, event):
         if hasattr(self, 'original_image'):
             if not self.is_break():
+                return
                 self.resize_image()
 
     def is_break(self):
@@ -522,7 +535,7 @@ class DrawingPracticeApp:
         # Обновляем смещение изображения
         self.offset_x = new_center_x - (self.canvas.winfo_width() // 2)
         self.offset_y = new_center_y - (self.canvas.winfo_height() // 2)
-        
+
         self.resize_image()
 
     def on_drag_start(self, event):
@@ -539,7 +552,7 @@ class DrawingPracticeApp:
             self.offset_y += delta_y
             self.drag_start_x = event.x
             self.drag_start_y = event.y
-            self.resize_image()
+            self.update_image_position()
 
     def on_drag_end(self, event):
         self.is_dragging = False
