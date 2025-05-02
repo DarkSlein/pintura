@@ -8,6 +8,12 @@ if not exist "venv" (
     exit /b
 )
 
-call venv/Scripts/activate
+call venv\Scripts\activate
+
+for /f "delims=" %%a in ('python update_version.py') do set "version=%%a"
+
 pyinstaller --noconsole app.py
+
+python create_archive.py "%version%"
+
 pause

@@ -422,11 +422,10 @@ class DrawingPracticeApp:
                 self.photo = ImageTk.PhotoImage(resized)
         else:
             # Полноразмерный рендеринг с оптимизацией
+            resized = self.original_image.resize((img_width, img_height), Image.Resampling.LANCZOS)
             if self.quality_mode == 'low' or abs(self.scale_factor - self.last_scale_factor) > 0.1:
-                resized = self.original_image.resize((img_width, img_height), Image.Resampling.NEAREST)
                 self.quality_mode = 'low'
             else:
-                resized = self.original_image.resize((img_width, img_height), Image.Resampling.LANCZOS)
                 self.quality_mode = 'high'
             
             self.photo = ImageTk.PhotoImage(resized)
