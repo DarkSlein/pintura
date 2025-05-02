@@ -95,6 +95,11 @@ class DrawingPracticeApp:
 
         self.image_id = None
 
+        self.last_scale_factor = 1.0
+        self.quality_mode = 'high'  # 'low' или 'high'
+        self.pending_high_quality = False
+        self.viewport_cache = None
+
         self.canvas.bind("<Button-3>", self.on_canvas_click)
         self.canvas.bind("<MouseWheel>", self.on_mousewheel)
         self.canvas.bind("<ButtonPress-1>", self.on_drag_start)
@@ -326,6 +331,13 @@ class DrawingPracticeApp:
             # Proccess the timer counter
             self.count_time()
 
+            # Предварительная оптимизация изображения
+            if self.original_image.width > 4000 or self.original_image.height > 4000:
+                self.original_image = self.original_image.resize(
+                    (self.original_image.width // 2, self.original_image.height // 2),
+                    Image.Resampling.LANCZOS
+                )
+
     def resume_timer(self):
         self.start_time = time.time()
         self.count_time()
@@ -379,13 +391,50 @@ class DrawingPracticeApp:
         self.current_base_width = base_width
         self.current_base_height = base_height
         
-        # Применяем текущий масштаб
-        scaled_width = int(base_width * self.scale_factor)
-        scaled_height = int(base_height * self.scale_factor)
-        resized_image = self.original_image.resize((scaled_width, scaled_height))
+        # Определяем границы видимой части изображения
+        img_width = int(self.current_base_width * self.scale_factor)
+        img_height = int(self.current_base_height * self.scale_factor)
         
-        # Создаем новое изображение только при изменении размера/повороте
-        self.photo = ImageTk.PhotoImage(resized_image)
+        # Вычисляем область изображения, которая попадает в холст
+        x0 = max(0, (canvas_width//2 + self.offset_x) - canvas_width//2)
+        y0 = max(0, (canvas_height//2 + self.offset_y) - canvas_height//2)
+        x1 = min(img_width, x0 + canvas_width)
+        y1 = min(img_height, y0 + canvas_height)
+
+        # Если увеличение больше 200% - рендерим только видимую часть
+        if self.scale_factor >= 2.0 and not self.pending_high_quality:
+            crop_box = (
+                int(x0 / self.scale_factor),
+                int(y0 / self.scale_factor),
+                int(x1 / self.scale_factor),
+                int(y1 / self.scale_factor)
+            )
+            
+            try:
+                cropped = self.original_image.crop(crop_box)
+                resized = cropped.resize(int((crop_box[2]-crop_box[0])*self.scale_factor, 
+                                        int((crop_box[3]-crop_box[1])*self.scale_factor)))
+                self.photo = ImageTk.PhotoImage(resized)
+                self.quality_mode = 'low'
+            except Exception as e:
+                # Если обрезка не удалась, используем полное изображение
+                resized = self.original_image.resize((img_width, img_height))
+                self.photo = ImageTk.PhotoImage(resized)
+        else:
+            # Полноразмерный рендеринг с оптимизацией
+            if self.quality_mode == 'low' or abs(self.scale_factor - self.last_scale_factor) > 0.1:
+                resized = self.original_image.resize((img_width, img_height), Image.Resampling.NEAREST)
+                self.quality_mode = 'low'
+            else:
+                resized = self.original_image.resize((img_width, img_height), Image.Resampling.LANCZOS)
+                self.quality_mode = 'high'
+            
+            self.photo = ImageTk.PhotoImage(resized)
+
+        # Отложенный высококачественный рендеринг
+        if self.quality_mode == 'low' and not self.pending_high_quality:
+            self.pending_high_quality = True
+            self.root.after(500, self.high_quality_redraw)
 
         # Обновляем или создаем изображение на холсте
         if self.image_id:
@@ -402,6 +451,12 @@ class DrawingPracticeApp:
         # Обновляем имя файла
         image_name = os.path.basename(self.image_path)
         self.folder_label.config(text=image_name)
+
+    def high_quality_redraw(self):
+        if self.pending_high_quality and abs(self.scale_factor - self.last_scale_factor) < 0.01:
+            self.quality_mode = 'high'
+            self.pending_high_quality = False
+            self.resize_image()
 
     def update_image_position(self):
         if self.image_id:
@@ -536,7 +591,9 @@ class DrawingPracticeApp:
         self.offset_x = new_center_x - (self.canvas.winfo_width() // 2)
         self.offset_y = new_center_y - (self.canvas.winfo_height() // 2)
 
+        self.scale_factor = new_scale
         self.resize_image()
+        self.canvas.update_idletasks()
 
     def on_drag_start(self, event):
         self.is_dragging = True
@@ -553,6 +610,10 @@ class DrawingPracticeApp:
             self.drag_start_x = event.x
             self.drag_start_y = event.y
             self.update_image_position()
+
+            if self.quality_mode == 'high':
+                self.quality_mode = 'low'
+                self.resize_image()
 
     def on_drag_end(self, event):
         self.is_dragging = False
