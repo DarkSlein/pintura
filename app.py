@@ -2,6 +2,8 @@ import os
 import tkinter as tk
 import time
 import random
+import threading
+import keyboard
 
 from tkinter import filedialog, messagebox
 from PIL import Image, ImageTk
@@ -33,6 +35,7 @@ class DrawingPracticeApp:
         self.count_time_work = None
         self.start_time = None
         self.remaining_time = 0
+        self.hotkeys_active = True
 
         self.title_bar_hidden = False
 
@@ -68,15 +71,15 @@ class DrawingPracticeApp:
         self.next_timer_button = tk.Button(self.buttons_frame, text=">>", command=self.next_timer)
         self.next_timer_button.grid(row=0, column=3, padx=5)
         
-        self.exit_button = tk.Button(self.buttons_frame, text="Exit", command=self.root.quit)
-        self.exit_button.grid(row=0, column=4, padx=5)
-
         self.rotate_button = tk.Button(self.buttons_frame, text="Rotate", command=self.rotate_image)
-        self.rotate_button.grid(row=0, column=5, padx=5)
+        self.rotate_button.grid(row=0, column=4, padx=5)
 
         self.hide_button = tk.Button(self.buttons_frame, text="Hide Bar", command=self.hide_title_bar)
-        self.hide_button.grid(row=0, column=6, padx=5)
-        
+        self.hide_button.grid(row=0, column=5, padx=5)
+
+        self.exit_button = tk.Button(self.buttons_frame, text="Exit", command=self.root.quit)
+        self.exit_button.grid(row=0, column=6, padx=5)
+
         self.root.configure(bg='white')
         self.canvas.configure(bg='white')
         self.buttons_frame.configure(bg='white')
@@ -164,6 +167,23 @@ class DrawingPracticeApp:
         self.shuffle_checkbox.select()
         self.shuffle_checkbox.pack()
 
+        # Добавлен блок с горячими клавишами
+        hotkeys_frame = tk.Frame(self.settings_window)
+        hotkeys_frame.pack(fill='x', padx=5, pady=(10, 5))
+        
+        tk.Label(hotkeys_frame, text="Hotkeys:", font=('Arial', 9, 'bold')).pack(anchor='w')
+        
+        hotkeys_text = [
+            "Space - Pause/Resume",
+            "A / Left Arrow - Previous image",
+            "D / Right Arrow - Next image",
+            "R - Rotate image",
+            "H - Hide/show title bar"
+        ]
+        
+        for text in hotkeys_text:
+            tk.Label(hotkeys_frame, text=text, anchor='w', font=('Arial', 8)).pack(fill='x', padx=(10, 0))
+
         # Button to confirm settings
         self.save_settings_button = tk.Button(self.settings_window, text="Save Settings", command=self.save_settings)
         self.update_settings_window()
@@ -232,6 +252,14 @@ class DrawingPracticeApp:
         # Load images based on the settings
         self.load_images()
 
+        # Register keys when the image window is opened
+        self.root.bind("<Unmap>", self.on_window_minimized)
+        self.root.bind("<Map>", self.on_window_restored)
+        self.root.protocol("WM_DELETE_WINDOW", self.on_app_close)
+
+        self.hotkey_thread = threading.Thread(target=self.hotkey_listener, daemon=True)
+        self.hotkey_thread.start()
+
     def load_images(self):
         if self.mode == 1:
             self.load_images_same_length()
@@ -284,7 +312,7 @@ class DrawingPracticeApp:
 
         elif self.class_timer == "1.5 hours":
             self.timer_list = [30] * 6 + [60] * 3 + [180] * 2 + [600] * 1 + [1500] * 1 + [480] * 1 + [2100] * 1
-            self.break_list = [False] * 6 + [False] * 3 + [False] * 2 + [False] * 2 + [False] * 1 + [True] * 1 + [False] * 1
+            self.break_list = [False] * 6 + [False] * 3 + [False] * 2 + [False] * 1 + [False] * 1 + [True] * 1 + [False] * 1
 
         elif self.class_timer == "2 hours":
             self.timer_list = [30] * 6 + [60] * 3 + [300] * 2 + [600] * 2 + [1200] * 1 + [840] * 1 + [3000] * 1
@@ -297,13 +325,13 @@ class DrawingPracticeApp:
         elif self.class_timer == "6 hours":
             self.timer_list = (
                 [30] * 10 + [60] * 5 + [300] * 2 + [600] * 1 + [1200] * 1 + [600] * 1 +
-                [1800] * 2 + [600] * 1 + [3000] * 1 + [2700] * 1 + [30] * 6 + [60] * 4 +
-                [300] * 3 + [600] * 1 + [2700] * 1 + [600] * 1 + [6600] * 1
+                [1800] * 2 + [600] * 1 + [3000] * 1 + [2700] * 1 + [30] * 4 + [60] * 3 +
+                [300] * 2 + [600] * 2 + [600] * 1 + [5400] * 1
             )
             self.break_list = (
                 [False] * 10 + [False] * 5 + [False] * 2 + [False] * 1 + [False] * 1 + [True] * 1 +
-                [False] * 2 + [True] * 1 + [False] * 1 + [True] * 1 + [False] * 6 + [False] * 4 +
-                [False] * 3 + [False] * 1 + [False] * 1 + [True] * 1 + [False] * 1
+                [False] * 2 + [True] * 1 + [False] * 1 + [True] * 1 + [False] * 4 + [False] * 3 +
+                [False] * 2 + [False] * 2 + [True] * 1 + [False] * 1
             )
 
     def shuffle_image_list(self):
@@ -313,10 +341,12 @@ class DrawingPracticeApp:
 
     def load_next_image(self):
         if self.is_break():
-            self.canvas.delete("all")
+            self.canvas.itemconfig(1, state='hidden')
             self.folder_label.config(text='BREAK')
             self.count_time()
             return
+        else:
+            self.canvas.itemconfig(1, state='normal')
 
         if self.current_image_index < len(self.image_list):
             self.image_path = self.image_list[self.current_image_index]
@@ -534,11 +564,31 @@ class DrawingPracticeApp:
         self.original_image = self.original_image.rotate(90, expand=True)
         self.resize_image()
 
+    def hotkey_listener(self):
+        def handle_key(event):
+            if not self.hotkeys_active:
+                return
+            
+            if event.name == "space":
+                self.root.after(0, self.toggle_pause)
+            elif event.name in ["a", "left"]:
+                self.root.after(0, self.show_previous_image)
+            elif event.name in ["d", "right"]:
+                self.root.after(0, self.change_picture)
+            elif event.name == "r":
+                self.root.after(0, self.rotate_image)
+            elif event.name == "h":
+                self.root.after(0, self.hide_title_bar)
+
+        keyboard.on_press(handle_key)
+
+        while True:
+            time.sleep(1)
+
     def on_resize(self, event):
         if hasattr(self, 'original_image'):
             if not self.is_break():
                 return
-                self.resize_image()
 
     def is_break(self):
         return self.mode != 1 and self.break_list[self.current_timer_index - 1]
@@ -619,6 +669,16 @@ class DrawingPracticeApp:
 
     def on_folder_label_click(self, event):
         os.startfile(self.image_path)
+
+    def on_window_minimized(self, event=None):
+        self.hotkeys_active = False
+    
+    def on_window_restored(self, event=None):
+        self.hotkeys_active = True
+    
+    def on_app_close(self):
+        self.hotkeys_active = False
+        self.root.destroy()
 
 if __name__ == "__main__":
     root = tk.Tk()
